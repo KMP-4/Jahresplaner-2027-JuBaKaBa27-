@@ -315,11 +315,12 @@
 
     <script>
         const SUPABASE_URL = "https://sgeyxpvpyhjuzmnkgxow.supabase.co";
-        const SUPABASE_ANON_KEY = "Sb_publishable_ijrAWSC95hWQ-ZABLZ6Vpw_QbIRP6Pc"; 
+        // WICHTIG: Falls hier kein echter langer JWT-Key steht, läuft die App im lokalen Modus ohne Hängenbleiben!
+        const SUPABASE_ANON_KEY = "Sgeyxpvpyhjuzmnkgxow"; 
         const APP_PASSWORD = "2027";
 
         let supabase = null;
-        if (SUPABASE_ANON_KEY && typeof window.supabase !== 'undefined') {
+        if (SUPABASE_ANON_KEY && SUPABASE_ANON_KEY !== "Sgeyxpvpyhjuzmnkgxow" && SUPABASE_ANON_KEY.length > 20 && typeof window.supabase !== 'undefined') {
             try {
                 supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
             } catch(e) {
@@ -472,7 +473,14 @@
 
         async function loadEvents() {
             if (!supabase) {
-                return createInitialEvents();
+                // Lokaler Modus falls kein Supabase Key gesetzt
+                const local = localStorage.getItem('planner_events_2027');
+                if (local) {
+                    try { return JSON.parse(local); } catch(e) {}
+                }
+                const initial = createInitialEvents();
+                localStorage.setItem('planner_events_2027', JSON.stringify(initial));
+                return initial;
             }
             try {
                 const { data, error } = await supabase.from('events').select('*');
@@ -486,21 +494,29 @@
                     return initial;
                 }
             } catch (e) {
-                console.error("Supabase Daten-Ladefehler, falle auf lokale Daten zurück:", e);
+                console.error("Supabase Ladefehler, nutze lokalen Speicher:", e);
+                const local = localStorage.getItem('planner_events_2027');
+                if (local) {
+                    try { return JSON.parse(local); } catch(err) {}
+                }
                 return createInitialEvents();
             }
         }
 
         async function saveEvents() {
-            if (!supabase) return;
-            try {
-                await supabase.from('events').delete().filter('id', 'neq', '0');
-                if (events.length > 0) {
-                    await supabase.from('events').insert(events);
+            if (supabase) {
+                try {
+                    await supabase.from('events').delete().filter('id', 'neq', '0');
+                    if (events.length > 0) {
+                        await supabase.from('events').insert(events);
+                    }
+                } catch (e) {
+                    console.error("Supabase Speicherfehler:", e);
                 }
-            } catch (e) {
-                console.error("Supabase Speicherfehler:", e);
             }
+            try {
+                localStorage.setItem('planner_events_2027', JSON.stringify(events));
+            } catch(e) {}
         }
 
         const MONTH_NAMES = [
