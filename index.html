@@ -30,11 +30,12 @@
                 <h2 class="text-xl font-bold text-slate-900">Jahresplaner 2027</h2>
                 <p class="text-xs text-slate-500 mt-1">Bitte Passwort eingeben, um auf die Daten zuzugreifen.</p>
             </div>
-            <form id="auth-form" class="space-y-3">
+            <form id="auth-form" class="space-y-3" onsubmit="return false;">
                 <input type="password" id="auth-password" placeholder="Passwort eingeben" required
                        class="w-full px-4 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-center">
-                <button type="submit" id="auth-submit-btn" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-xl shadow-sm transition-all">
-                    Anmelden
+                <button type="submit" id="auth-submit-btn" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-xl shadow-sm transition-all flex items-center justify-center gap-2">
+                    <span id="auth-btn-text">Anmelden</span>
+                    <span id="auth-spinner" class="hidden w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                 </button>
             </form>
             <p id="auth-error" class="text-xs text-rose-600 hidden font-medium">Falsches Passwort!</p>
@@ -58,7 +59,7 @@
                             <p class="text-[11px] text-indigo-200 flex items-center gap-1">
                                 Sara & Julian • 
                                 <span id="cloud-status-badge" class="inline-flex items-center gap-1 text-emerald-400 font-medium">
-                                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Synchronisiert
+                                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Cloud Synchronisiert
                                 </span>
                             </p>
                         </div>
@@ -314,7 +315,7 @@
 
     <script>
         const SUPABASE_URL = "https://sgeyxpvpyhjuzmnkgxow.supabase.co";
-        const SUPABASE_ANON_KEY = "sgeyxpvpyhjuzmnkgxow"; 
+        const SUPABASE_ANON_KEY = "Sgeyxpvpyhjuzmnkgxow"; 
         const APP_PASSWORD = "2027";
 
         let supabase = null;
@@ -322,11 +323,9 @@
             try {
                 supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
             } catch(e) {
-                console.warn("Supabase init error:", e);
+                console.error("Supabase Init Fehler:", e);
             }
         }
-
-        const STORAGE_KEY = 'jahresplaner_2027_events_v4';
 
         const NDS_HOLIDAYS_2027 = [
             { name: "Weihnachtsferien", start: "2027-01-01", end: "2027-01-09" },
@@ -472,46 +471,40 @@
         }
 
         async function loadEvents() {
-            if (supabase) {
-                try {
-                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 2500));
-                    const fetchPromise = supabase.from('events').select('*');
-                    const res = await Promise.race([fetchPromise, timeoutPromise]);
-                    
-                    if (res && !res.error && res.data && res.data.length > 0) {
-                        return res.data;
-                    }
-                } catch (e) {
-                    console.warn("Supabase-Zugriff nicht möglich, nutze lokalen Speicher.", e);
-                    const badge = document.getElementById('cloud-status-badge');
-                    if (badge) badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400"></span> Lokaler Speicher`;
-                }
+            if (!supabase) {
+                alert("Keine Supabase-Verbindung konfiguriert. Erstellung schlägt fehl.");
+                return [];
             }
             try {
-                const saved = localStorage.getItem(STORAGE_KEY);
-                if (saved) return JSON.parse(saved);
+                const { data, error } = await supabase.from('events').select('*');
+                if (error) throw error;
+                
+                if (data && data.length > 0) {
+                    return data;
+                } else {
+                    // Wenn die Datenbank komplett leer ist, mit Standarddaten füllen
+                    const initial = createInitialEvents();
+                    await supabase.from('events').insert(initial);
+                    return initial;
+                }
             } catch (e) {
-                console.warn('Fehler beim Laden aus localStorage', e);
+                console.error("Supabase Daten-Ladefehler:", e);
+                alert("Fehler beim Verbinden mit der Cloud-Datenbank! Bitte prüfe deine Netzverbindung.");
+                return [];
             }
-            return createInitialEvents();
         }
 
         async function saveEvents() {
+            if (!supabase) return;
             try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
-            } catch (e) {
-                console.warn('Fehler beim Speichern in localStorage', e);
-            }
-
-            if (supabase) {
-                try {
-                    await supabase.from('events').delete().neq('id', '0');
-                    if (events.length > 0) {
-                        await supabase.from('events').insert(events);
-                    }
-                } catch (e) {
-                    console.warn("Supabase Speichern fehlgeschlagen:", e);
+                // Erst alte löschen, dann neue einfügen um Konsistenz zu halten
+                await supabase.from('events').delete().filter('id', 'neq', '0');
+                if (events.length > 0) {
+                    await supabase.from('events').insert(events);
                 }
+            } catch (e) {
+                console.error("Supabase Speicherfehler:", e);
+                alert("Änderungen konnten nicht in der Cloud gespeichert werden!");
             }
         }
 
@@ -1030,9 +1023,11 @@
             };
 
             document.getElementById('reset-storage-btn').onclick = async () => {
-                events = createInitialEvents();
-                await saveEvents();
-                renderView();
+                if (confirm("Möchtest du wirklich alle Termine auf den Standardzustand zurücksetzen?")) {
+                    events = createInitialEvents();
+                    await saveEvents();
+                    renderView();
+                }
             };
 
             document.getElementById('add-event-btn').onclick = () => openEventModal('2027-01-01');
@@ -1085,22 +1080,39 @@
             if (window.lucide) lucide.createIcons();
         }
 
+        async function handleLogin() {
+            const inputPass = document.getElementById('auth-password').value;
+            if (inputPass === APP_PASSWORD) {
+                document.getElementById('auth-error').classList.add('hidden');
+                document.getElementById('auth-btn-text').innerText = "Lade Daten...";
+                document.getElementById('auth-spinner').classList.remove('hidden');
+                
+                try {
+                    sessionStorage.setItem('planner_authenticated', 'true');
+                } catch(err) {}
+
+                await initApp();
+
+                document.getElementById('auth-screen').classList.add('hidden');
+            } else {
+                document.getElementById('auth-error').classList.remove('hidden');
+            }
+        }
+
         window.onload = function() {
             if (window.lucide) lucide.createIcons();
 
-            const authForm = document.getElementById('auth-form');
-            if (authForm) {
-                authForm.onsubmit = function(e) {
-                    e.preventDefault();
-                    const inputPass = document.getElementById('auth-password').value;
-                    if (inputPass === APP_PASSWORD) {
-                        try {
-                            sessionStorage.setItem('planner_authenticated', 'true');
-                        } catch(err) {}
-                        document.getElementById('auth-screen').classList.add('hidden');
-                        initApp();
-                    } else {
-                        document.getElementById('auth-error').classList.remove('hidden');
+            const authBtn = document.getElementById('auth-submit-btn');
+            if (authBtn) {
+                authBtn.onclick = handleLogin;
+            }
+
+            const authPasswordInput = document.getElementById('auth-password');
+            if (authPasswordInput) {
+                authPasswordInput.onkeydown = function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleLogin();
                     }
                 };
             }
@@ -1112,7 +1124,7 @@
                     initApp();
                 }
             } catch(e) {
-                console.warn("sessionStorage not available", e);
+                console.warn("sessionStorage unzugänglich", e);
             }
         };
     </script>
