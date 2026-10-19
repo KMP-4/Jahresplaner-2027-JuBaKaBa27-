@@ -30,7 +30,7 @@
                 <h2 class="text-xl font-bold text-slate-900">Jahresplaner 2027</h2>
                 <p class="text-xs text-slate-500 mt-1">Bitte Passwort eingeben, um auf die Daten zuzugreifen.</p>
             </div>
-            <form id="auth-form" class="space-y-3" onsubmit="return false;">
+            <form id="auth-form" class="space-y-3" onsubmit="event.preventDefault(); handleLogin(); return false;">
                 <input type="password" id="auth-password" placeholder="Passwort eingeben" required
                        class="w-full px-4 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-center">
                 <button type="submit" id="auth-submit-btn" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-xl shadow-sm transition-all flex items-center justify-center gap-2">
@@ -472,8 +472,7 @@
 
         async function loadEvents() {
             if (!supabase) {
-                alert("Keine Supabase-Verbindung konfiguriert. Erstellung schlägt fehl.");
-                return [];
+                return createInitialEvents();
             }
             try {
                 const { data, error } = await supabase.from('events').select('*');
@@ -482,29 +481,25 @@
                 if (data && data.length > 0) {
                     return data;
                 } else {
-                    // Wenn die Datenbank komplett leer ist, mit Standarddaten füllen
                     const initial = createInitialEvents();
                     await supabase.from('events').insert(initial);
                     return initial;
                 }
             } catch (e) {
-                console.error("Supabase Daten-Ladefehler:", e);
-                alert("Fehler beim Verbinden mit der Cloud-Datenbank! Bitte prüfe deine Netzverbindung.");
-                return [];
+                console.error("Supabase Daten-Ladefehler, falle auf lokale Daten zurück:", e);
+                return createInitialEvents();
             }
         }
 
         async function saveEvents() {
             if (!supabase) return;
             try {
-                // Erst alte löschen, dann neue einfügen um Konsistenz zu halten
                 await supabase.from('events').delete().filter('id', 'neq', '0');
                 if (events.length > 0) {
                     await supabase.from('events').insert(events);
                 }
             } catch (e) {
                 console.error("Supabase Speicherfehler:", e);
-                alert("Änderungen konnten nicht in der Cloud gespeichert werden!");
             }
         }
 
@@ -1081,11 +1076,18 @@
         }
 
         async function handleLogin() {
-            const inputPass = document.getElementById('auth-password').value;
+            const inputPassElement = document.getElementById('auth-password');
+            if (!inputPassElement) return;
+            
+            const inputPass = inputPassElement.value;
+            const errorElement = document.getElementById('auth-error');
+            const btnText = document.getElementById('auth-btn-text');
+            const spinner = document.getElementById('auth-spinner');
+
             if (inputPass === APP_PASSWORD) {
-                document.getElementById('auth-error').classList.add('hidden');
-                document.getElementById('auth-btn-text').innerText = "Lade Daten...";
-                document.getElementById('auth-spinner').classList.remove('hidden');
+                if (errorElement) errorElement.classList.add('hidden');
+                if (btnText) btnText.innerText = "Lade Daten...";
+                if (spinner) spinner.classList.remove('hidden');
                 
                 try {
                     sessionStorage.setItem('planner_authenticated', 'true');
@@ -1093,34 +1095,38 @@
 
                 await initApp();
 
-                document.getElementById('auth-screen').classList.add('hidden');
+                const authScreen = document.getElementById('auth-screen');
+                if (authScreen) authScreen.classList.add('hidden');
             } else {
-                document.getElementById('auth-error').classList.remove('hidden');
+                if (errorElement) errorElement.classList.remove('hidden');
             }
         }
 
         window.onload = function() {
             if (window.lucide) lucide.createIcons();
 
-            const authBtn = document.getElementById('auth-submit-btn');
-            if (authBtn) {
-                authBtn.onclick = handleLogin;
+            const authForm = document.getElementById('auth-form');
+            if (authForm) {
+                authForm.onsubmit = function(e) {
+                    e.preventDefault();
+                    handleLogin();
+                    return false;
+                };
             }
 
-            const authPasswordInput = document.getElementById('auth-password');
-            if (authPasswordInput) {
-                authPasswordInput.onkeydown = function(e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleLogin();
-                    }
+            const authBtn = document.getElementById('auth-submit-btn');
+            if (authBtn) {
+                authBtn.onclick = function(e) {
+                    e.preventDefault();
+                    handleLogin();
                 };
             }
 
             try {
                 const isAuth = sessionStorage.getItem('planner_authenticated');
                 if (isAuth === 'true') {
-                    document.getElementById('auth-screen').classList.add('hidden');
+                    const authScreen = document.getElementById('auth-screen');
+                    if (authScreen) authScreen.classList.add('hidden');
                     initApp();
                 }
             } catch(e) {
